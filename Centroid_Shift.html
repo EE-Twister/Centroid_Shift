@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interactive Curve & Centroid</title>
+  <!-- Chart.js core -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- DragData plugin -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-dragdata@2.0.0"></script>
+  <!-- Date adapter for time scale -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+  <!-- CSV parser -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5"></script>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    #controls { margin-bottom: 15px; }
+    #controls label, #controls button { display: inline-block; margin-right: 20px; vertical-align: middle; }
+    #controls input, #controls select, #controls button { vertical-align: middle; }
+    #controls span.val { display: inline-block; width: 4ch; text-align: right; margin-left: 4px; }
+    #formulaBox { display: inline-block; margin-left: 16px; vertical-align: middle; font-size: 1.05em; background: #f5f5f5; border-radius: 6px; padding: 6px 16px; border: 1px solid #ddd;}
+    #main { display: flex; align-items: flex-start; }
+    #plot { flex: 1; width: 100%; max-width: 1200px; }
+    canvas { display: block; width: 100%; height: auto; }
+    #infoPanel { margin-left: 30px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; min-width: 180px; }
+    #infoPanel div { margin-bottom: 8px; }
+    #infoPanel strong { display: block; margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+
+  <div id="controls">
+    <label>Upload CSV: <input type="file" id="csvFile" accept=".csv"></label>
+    <button id="exportCSV">Export CSV</button>
+    <br><br>
+    <label>Start Date: <input type="date" id="startDate"></label>
+    <label>End Date: <input type="date" id="endDate"></label>
+    <label>Y-Max: <input type="number" id="yMax" min="1" step="1"> <span class="val" id="yMaxVal"></span></label>
+    <br><br>
+    <label>Profile: 
+      <select id="distType">
+        <option value="flat">Flat Top</option>
+        <option value="gennorm">GenNorm</option>
+        <option value="leftskew">Left Skew</option>
+        <option value="bell">Bell</option>
+        <option value="rightskew">Right Skew</option>
+      </select>
+    </label>
+    <button id="resetCurve">Reset to Profile</button>
+    <!-- ADDED: Formula Display -->
+    <span id="formulaBox"></span>
+    <br><br>
+    <div id="paramControls">
+      <label id="alphaControl">α (skewness factor): <input type="range" id="alpha" min="0" max="20" step="0.1"><span class="val" id="alphaVal"></span></label>
+      <label id="betaControl">β (shape exponent): <input type="range" id="beta" min="0.1" max="10" step="0.1"><span class="val" id="betaVal"></span></label>
+      <label id="muControl">μ (center): <input type="range" id="mu" min="0" max="1" step="0.01"><span class="val" id="muVal"></span></label>
+      <label id="sigmaControl">σ (spread): <input type="range" id="sigma" min="0.01" max="0.5" step="0.01"><span class="val" id="sigmaVal"></span></label>
+      <label id="gammaControl">γ (flat width): <input type="range" id="gamma" min="0" max="1" step="0.01"><span class="val" id="gammaVal"></span></label>
+    </div>
+  </div>
+
+  <div id="main">
+    <canvas id="plot"></canvas>
+    <div id="infoPanel">
+      <div id="centroidDisplay">
+        <strong>Centroid</strong>
+        x: <span id="centroidX">–</span><br>
+        y: <span id="centroidY">–</span>
+      </div>
+      <div id="cumulativeDisplay">
+        <strong>Cumulative</strong>
+        <input type="number" id="cumulativeInput" step="any" style="width:8ch;">
+        <button id="setCumulativeBtn">Set</button>
+        <span id="cumulative">–</span>
+      </div>
+      <!-- ADDED: Max Slope Display -->
+      <div id="maxSlopeDisplay">
+        <strong>Max Slope</strong>
+        <span id="maxSlope">–</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- Defaults & mappings ---
+    const defaults = { yMax: 1000, distType: 'bell', alpha: 5, beta: 2, mu: 0.5, sigma: 0.15, gamma: 0.2 };
+    const columnMap = { flat: 'Flat Top', gennorm: 'GenNorm', leftskew: 'Left Skew', bell: 'Bell', rightskew: 'Right Skew' };
+
+    // --- PDF & distributions ---
+    const xs = Array.from({ length: 200 }, (_, i) => i / 199);
+    function normalPDF(x, mu, sig) {
+      const z = (x - mu) / sig;
+      return Math.exp(-0.5 * z*z) / (sig * Math.sqrt(2 * Math.PI));
+    }
+    function normalPDF_deriv(x, mu, sig) {
+      const z = (x - mu) / sig;
+      // d/dx of PDF: -z/sig * normalPDF
+      return -z / sig * normalPDF(x, mu, sig);
+    }
+    function erf(x) {
+      const sign = x < 0 ? -1 : 1;
+      x = Math.abs(x);
+      const [a1,a2,a3,a4,a5,p] = [0.254829592,-0.284496736,1.421413741,-1.453152027,1.061405429,0.3275911];
+      let t = 1 / (1 + p*x);
+      let y = 1 - (((((a5*t + a4)*t)+a3)*t+a2)*t+a1)*t*Math.exp(-x*x);
+      return sign * y;
+    }
+    function skewPDF(x, alpha, mu, sig) {
+      const z = (x - mu)/sig;
+      const phi = Math.exp(-0.5*z*z)/Math.sqrt(2*Math.PI);
+      const Phi = 0.5*(1 + erf(alpha*z/Math.SQRT2));
+      return (2*phi*Phi)/sig;
+    }
+    function flatPDF(x, mu, g) {
+      const a = Math.max(0,mu-g/2), b = Math.min(1,mu+g/2);
+      if(x<a) return a>0? x/a:0;
+      if(x<=b) return 1;
+      return (1-x)/(1-b);
+    }
+    function genPDF(x, beta, mu, sig) {
+      return Math.exp(-Math.pow(Math.abs((x-mu)/sig),beta));
+    }
+
+    // --- Formulae for display ---
+    const formulaMap = {
+      flat: "f(x) = { 1 for |x-μ| ≤ γ/2; tapers linearly otherwise }",
+      gennorm: "f(x) = exp(-| (x-μ)/σ |^β )",
+      leftskew: "f(x) = 2·φ(z)·Φ(−α·z) / σ <br>z = (x−μ)/σ, φ = Normal PDF, Φ = Normal CDF",
+      bell: "f(x) = (1/(σ√(2π)))·exp(−½((x−μ)/σ)^2)",
+      rightskew: "f(x) = 2·φ(z)·Φ(α·z) / σ <br>z = (x−μ)/σ, φ = Normal PDF, Φ = Normal CDF"
+    };
+
+    // --- DOM refs ---
+    const startDateIn = document.getElementById('startDate'), endDateIn = document.getElementById('endDate');
+    const yMaxIn = document.getElementById('yMax'), yMaxVal = document.getElementById('yMaxVal');
+    const distType = document.getElementById('distType'), resetBtn = document.getElementById('resetCurve');
+    const csvFileIn = document.getElementById('csvFile'), exportBtn = document.getElementById('exportCSV');
+    const centroidX = document.getElementById('centroidX'), centroidY = document.getElementById('centroidY');
+    const cumulativeEl = document.getElementById('cumulative');
+    const alphaIn = document.getElementById('alpha'), betaIn = document.getElementById('beta');
+    const muIn = document.getElementById('mu'), sigmaIn = document.getElementById('sigma');
+    const gammaIn = document.getElementById('gamma');
+    const alphaValEl = document.getElementById('alphaVal'), betaValEl = document.getElementById('betaVal');
+    const muValEl = document.getElementById('muVal'), sigmaValEl = document.getElementById('sigmaVal');
+    const gammaValEl = document.getElementById('gammaVal');
+    const formulaBox = document.getElementById('formulaBox');
+    const cumulativeInput = document.getElementById('cumulativeInput');
+    const setCumulativeBtn = document.getElementById('setCumulativeBtn');
+    const maxSlopeEl = document.getElementById('maxSlope');
+
+    let csvData = [], csvColName = null, chart;
+
+    // --- Show/hide parameter controls ---
+    function updateParamVisibility() {
+      const map = {
+        flat: ['muControl','gammaControl'],
+        gennorm: ['betaControl','muControl','sigmaControl'],
+        leftskew: ['alphaControl','muControl','sigmaControl'],
+        bell: ['muControl','sigmaControl'],
+        rightskew: ['alphaControl','muControl','sigmaControl']
+      };
+      ['alphaControl','betaControl','muControl','sigmaControl','gammaControl'].forEach(id=>{
+        document.getElementById(id).style.display = 'none';
+      });
+      map[distType.value].forEach(id=>{
+        document.getElementById(id).style.display = 'inline-block';
+      });
+      // ADDED: Update Formula
+      updateFormula();
+    }
+
+    function updateFormula() {
+      const formula = formulaMap[distType.value];
+      formulaBox.innerHTML = formula || "";
+    }
+
+    // --- Restore defaults ---
+    function restoreDefaults() {
+      const today = new Date();
+      startDateIn.value = today.toISOString().slice(0,10);
+      const ny = new Date(); ny.setFullYear(today.getFullYear()+1);
+      endDateIn.value = ny.toISOString().slice(0,10);
+      yMaxIn.value = defaults.yMax; yMaxVal.textContent = defaults.yMax;
+      distType.value = defaults.distType;
+      alphaIn.value = defaults.alpha; alphaValEl.textContent = defaults.alpha;
+      betaIn.value = defaults.beta; betaValEl.textContent = defaults.beta;
+      muIn.value = defaults.mu; muValEl.textContent = defaults.mu.toFixed(2);
+      sigmaIn.value = defaults.sigma; sigmaValEl.textContent = defaults.sigma;
+      gammaIn.value = defaults.gamma; gammaValEl.textContent = defaults.gamma;
+      csvData = []; csvColName = null;
+      updateParamVisibility();
+    }
+
+    // --- Initialize Chart.js ---
+    function initChart() {
+      if(chart) return;
+      const ctx = document.getElementById('plot').getContext('2d');
+      chart = new Chart(ctx, {
+        type: 'scatter',
+        data: { datasets: [
+          { label: 'Profile', data: [], showLine: true, borderColor: 'blue', backgroundColor: 'blue', pointRadius: 2, dragData: true, dragX: false, dragY: true },
+          { label: 'Centroid', data: [], type: 'scatter', showLine: false, pointBackgroundColor: 'red', pointRadius: 6 }
+        ]},
+        options: {
+          responsive: true, maintainAspectRatio: true, aspectRatio: 3,
+          scales: {
+            x: { type: 'time', time: { unit: 'month' }, title: { display: true, text: 'Date' } },
+            y: { beginAtZero: true, title: { display: true, text: 'Value' }, max: defaults.yMax }
+          },
+          plugins: { legend: { position: 'top' }, dragData: { onDragEnd: () => updateCentroidAndCumulative() } },
+          animation: false
+        }
+      });
+    }
+
+    // --- CSV parse ---
+    function parseFile(file) {
+        Papa.parse(file, {
+            header: false,
+            skipEmptyLines: false,
+            complete(res) {
+            // Remove any leading blank lines
+            const rawRows = res.data.filter(row => Array.isArray(row));
+            // Gather first 12 non-blank, key-value parameter rows
+            const paramsList = [
+                "Profile", "StartDate", "EndDate", "YMax", "Alpha", "Beta", "Mu", "Sigma", "Gamma", "CentroidX", "CentroidY", "Cumulative"
+            ];
+            let paramsRows = [];
+            let i = 0;
+            // Collect only real param rows, skipping blanks at top or anywhere
+            while (paramsRows.length < 12 && i < rawRows.length) {
+                const row = rawRows[i];
+                if (Array.isArray(row) && row.length > 1 && row[0] && row[0].trim()) {
+                paramsRows.push(row);
+                }
+                i++;
+            }
+            // Now, check: exactly 12 params, in correct order
+            if (paramsRows.length !== 12) {
+                alert("Uploaded file does not contain the required 12 curve parameters. Upload cancelled.");
+                return;
+            }
+            const keys = paramsRows.map(r => (r[0]||"").trim());
+            const allKeysMatch = paramsList.every((p, idx) => keys[idx] === p);
+            if (!allKeysMatch) {
+                alert("Uploaded file does not contain valid curve parameters. Upload cancelled.");
+                return;
+            }
+            // All good, extract values and set controls
+            const values = paramsRows.map(r => r[1]);
+            const params = {};
+            paramsList.forEach((k, idx) => params[k] = values[idx]);
+            distType.value = Object.keys(columnMap).find(k => columnMap[k] === params.Profile) || "bell";
+            startDateIn.value = params.StartDate;
+            endDateIn.value = params.EndDate;
+            yMaxIn.value = params.YMax;
+            alphaIn.value = params.Alpha;
+            betaIn.value = params.Beta;
+            muIn.value = params.Mu;
+            sigmaIn.value = params.Sigma;
+            gammaIn.value = params.Gamma;
+            updateParamVisibility();
+            csvData = [];
+            csvColName = null;
+            alphaValEl.textContent = alphaIn.value;
+            betaValEl.textContent = betaIn.value;
+            muValEl.textContent = muIn.value;
+            sigmaValEl.textContent = sigmaIn.value;
+            gammaValEl.textContent = gammaIn.value;
+            yMaxVal.textContent = yMaxIn.value;
+            // ADDED: Set cumulativeInput to imported value
+            cumulativeInput.value = params.Cumulative;
+            initPlot();
+            }
+        });
+    }
+
+    // --- Plot logic ---
+    function initPlot() {
+      initChart();
+      const start = new Date(startDateIn.value), end = new Date(endDateIn.value), yMax = +yMaxIn.value;
+      let pts = [];
+      if(csvData.length) {
+        const filtered = csvData.filter(r => r.date >= start && r.date <= end);
+        pts = filtered.map(r => ({ x: r.date, y: +r.val }));
+        chart.options.scales.y.max = yMax;
+      } else {
+        const [a,b,m,s,g] = [+alphaIn.value, +betaIn.value, +muIn.value, +sigmaIn.value, +gammaIn.value];
+        const fnMap = {
+          flat:    x => flatPDF(x,m,g),
+          gennorm: x => genPDF(x,b,m,s),
+          leftskew:x => skewPDF(x,-a,m,s),
+          bell:    x => normalPDF(x,m,s),
+          rightskew:x => skewPDF(x,a,m,s)
+        };
+        const fn = fnMap[distType.value];
+        const raw = xs.map(fn), R = Math.max(...raw);
+        pts = xs.map((x,i) => ({ x: new Date(start.getTime() + x*(end-start)), y: (raw[i]/R)*yMax }));
+        chart.options.scales.y.max = yMax;
+      }
+      chart.data.datasets[0].data = pts;
+      chart.options.scales.x.min = start;
+      chart.options.scales.x.max = end;
+      chart.update();
+      updateCentroidAndCumulative();
+    }
+
+    // --- Centroid & cumulative & max slope ---
+    function updateCentroidAndCumulative() {
+      const pts = chart.data.datasets[0].data;
+      if(!pts.length) return;
+      const minT = chart.options.scales.x.min.getTime(), maxT = chart.options.scales.x.max.getTime();
+      let sumY=0, sumXY=0;
+      pts.forEach(p => {
+        const f = (p.x.getTime()-minT)/(maxT-minT);
+        sumY += p.y; sumXY += f*p.y;
+      });
+      const xf = sumXY/sumY, cDate = new Date(minT + xf*(maxT-minT));
+      const yC = sumY ? pts.reduce((a,p)=>a+p.y*p.y,0)/(2*sumY) : 0;
+      chart.data.datasets[1].data = [{ x: cDate, y: yC }];
+      centroidX.textContent = cDate.toISOString().slice(0,10);
+      centroidY.textContent = yC.toFixed(2);
+      let cum = 0;
+      if(csvData.length) {
+        cum = pts.reduce((a,p)=>a+p.y,0);
+      } else {
+        const msDay = 1000*60*60*24;
+        for(let i=0; i<pts.length-1; i++) {
+          const yAvg = (pts[i].y + pts[i+1].y)/2;
+          const days = (pts[i+1].x - pts[i].x)/msDay;
+          cum += yAvg*days;
+        }
+      }
+      cumulativeEl.textContent = cum.toFixed(2);
+      cumulativeInput.value = cumulativeEl.textContent;
+
+      // ADDED: Max Slope Calculation
+      let maxSlope = 0;
+      for (let i = 1; i < pts.length; i++) {
+        const dx = (pts[i].x - pts[i-1].x) / (1000*60*60*24); // in days
+        const dy = pts[i].y - pts[i-1].y;
+        if (dx !== 0) {
+          const slope = dy / dx;
+          if (Math.abs(slope) > Math.abs(maxSlope)) maxSlope = slope;
+        }
+      }
+      maxSlopeEl.textContent = maxSlope.toFixed(2);
+      chart.update('none');
+    }
+
+    // --- CSV Export (unchanged) ---
+    function exportCSV() {
+      const params = {
+        Profile: columnMap[distType.value],
+        StartDate: startDateIn.value,
+        EndDate: endDateIn.value,
+        YMax: yMaxIn.value,
+        Alpha: alphaIn.value,
+        Beta: betaIn.value,
+        Mu: muIn.value,
+        Sigma: sigmaIn.value,
+        Gamma: gammaIn.value,
+        CentroidX: centroidX.textContent,
+        CentroidY: centroidY.textContent,
+        Cumulative: cumulativeEl.textContent
+      };
+      const metaRows = Object.entries(params).map(([k,v]) => [k,v]);
+      metaRows.push([]);
+      const rows = chart.data.datasets[0].data.map(p => ({
+        date: p.x.toISOString().slice(0,10),
+        value: p.y.toFixed(2)
+      }));
+      let csvMeta = Papa.unparse(metaRows, {header: false, skipEmptyLines: false});
+      let csvData = Papa.unparse(rows, {header: true});
+      let csvStr = csvMeta + "\n" + csvData;
+      const blob = new Blob([csvStr], { type:'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'exported_curve.csv';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    // --- Event bindings ---
+    csvFileIn.addEventListener('change', e => parseFile(e.target.files[0]));
+    exportBtn.addEventListener('click', exportCSV);
+    startDateIn.addEventListener('input', initPlot);
+    endDateIn.addEventListener('input', initPlot);
+    yMaxIn.addEventListener('input', () => { yMaxVal.textContent = yMaxIn.value; initPlot(); });
+    distType.addEventListener('input', () => { csvData = []; csvColName = null; updateParamVisibility(); initPlot(); });
+    resetBtn.addEventListener('click', () => { restoreDefaults(); initPlot(); });
+    [alphaIn, betaIn, muIn, sigmaIn, gammaIn].forEach(el => el.addEventListener('input', () => {
+      csvData = []; csvColName = null;
+      document.getElementById(el.id+'Val').textContent = el.value;
+      initPlot();
+    }));
+
+    // ADDED: Set Cumulative Button Logic
+    setCumulativeBtn.addEventListener('click', function() {
+      const targetCumulative = parseFloat(cumulativeInput.value);
+      if (isNaN(targetCumulative) || targetCumulative <= 0) {
+        alert('Enter a valid cumulative value.');
+        return;
+      }
+      let minY = 1, maxY = 1e7, iter = 0, bestYMax = yMaxIn.value, lastDiff = Infinity;
+      const maxIter = 30, tol = 1e-2;
+      while (iter < maxIter) {
+        let midY = (minY + maxY) / 2;
+        yMaxIn.value = midY;
+        yMaxVal.textContent = midY;
+        initPlot();
+        let actualCumulative = parseFloat(cumulativeEl.textContent);
+        let diff = actualCumulative - targetCumulative;
+        if (Math.abs(diff) < tol) {
+          bestYMax = midY;
+          break;
+        }
+        if (diff < 0) minY = midY;
+        else maxY = midY;
+        if (Math.abs(diff) < Math.abs(lastDiff)) bestYMax = midY;
+        lastDiff = diff;
+        iter++;
+      }
+      yMaxIn.value = bestYMax;
+      yMaxVal.textContent = bestYMax;
+      initPlot();
+    });
+
+    // --- Initialize ---
+    document.addEventListener('DOMContentLoaded', () => {
+      restoreDefaults();
+      yMaxVal.textContent = yMaxIn.value;
+      updateFormula();
+      initPlot();
+    });
+  </script>
+</body>
+</html>
