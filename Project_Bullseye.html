@@ -164,11 +164,11 @@
       transition: border-color 0.2s, z-index 0.2s;
     }
     .circle-5 {
-      width: 200px;   /* 5% radius = 100px */
+      width: 200px;   /* 5%  →  radius 100px */
       height: 200px;
     }
     .circle-10 {
-      width: 280px;   /* 10% radius = 140px */
+      width: 280px;   /* 10% →  radius 140px */
       height: 280px;
     }
 
@@ -714,10 +714,12 @@
     });
 
     /*****************************************************************************************
-     * Read xPercent & yPercent from the URL, convert them (piecewise) so that:
-     *   •  0%–5%   → 0px–100px    (20 px per 1%)
-     *   •  5%–10%  → 100px–140px  (8  px per 1%)
-     *   • ≥ 10%    → 140px         (“capped” on the 10% ring)
+     * Read xPercent & yPercent from the URL, convert them so that:
+     *
+     *   •  0%–5%    → 0px–100px     (20 px per 1%),
+     *   •  5%–10%   → 100px–140px   (8  px per 1%),
+     *   • 10%–100%  → 140px–350px   (2.333px per 1%),
+     *   • >100%     → continues linearly beyond 350px (if desired).
      *
      * Then reposition the centroid‐dot + label accordingly.
      *****************************************************************************************/
@@ -729,17 +731,18 @@
 
     function percentToPixels(pct) {
       // Convert a percentage value into a pixel offset from center,
-      // exactly matching 5%→100px and 10%→140px.
+      // matching your rings: 5%→100px, 10%→140px, and beyond 10% up to 100%→350px.
       pct = Math.abs(pct);
-      if (pct >= 10) {
-        return 140;
+      if (pct <= 5) {
+        // 0–5%    → 0–100px   (@ 20 px per 1%)
+        return pct * 20;
       }
-      if (pct >= 5) {
-        // slope = (140 - 100) / (10 - 5) = 40 / 5 = 8 px per 1%
+      if (pct <= 10) {
+        // 5–10%  → 100–140px  (@ 8 px per 1%)
         return 100 + (pct - 5) * 8;
       }
-      // slope = 100px / 5% = 20 px per 1%
-      return pct * 20;
+      // 10–100% → 140–350px  (@ (350−140)/(100−10) = 210/90 = 2.333... px per 1%)
+      return 140 + (pct - 10) * (210 / 90);
     }
 
     window.addEventListener('DOMContentLoaded', () => {
@@ -751,26 +754,28 @@
         const centroidLabel = document.getElementById('centroid-label');
         const chart = document.getElementById('chart-container');
         const rect  = chart.getBoundingClientRect();
-        const centerX = rect.width  / 2; // 350
-        const centerY = rect.height / 2; // 350
+        const centerX = rect.width  / 2; // 350 px
+        const centerY = rect.height / 2; // 350 px
 
-        // Convert raw percents into px offsets:
+        // Convert raw percents into px offsets from center:
         const pxX = percentToPixels(rawX);
         const pxY = percentToPixels(rawY);
 
-        // Determine final CSS left/top:
-        // If rawX < 0 → move left; if rawX > 0 → move right.
+        // Compute final CSS left (x) and top (y):
+        //   rawX <  0 → move LEFT  by pxX
+        //   rawX >= 0 → move RIGHT by pxX
         const finalLeft = centerX + (rawX < 0 ? -pxX : pxX);
-        // If rawY > 0 → move up; if rawY < 0 → move down.
-        // CSS 'top' grows downward, so upward means subtract.
+
+        // rawY >  0 → move UP    by pxY  → CSS top = centerY - pxY
+        // rawY <= 0 → move DOWN  by pxY  → CSS top = centerY + pxY
         const finalTop  = centerY - (rawY < 0 ? -pxY : pxY);
 
-        // Apply to the dot:
+        // Apply to the centroid dot:
         centroidDot.style.left      = `${finalLeft}px`;
         centroidDot.style.top       = `${finalTop}px`;
         centroidDot.style.transform = 'translate(-50%, -50%)';
 
-        // Nudge the label slightly so it doesn’t overlap the dot:
+        // Nudge the centroid label a few pixels so it doesn't cover the dot:
         const labelOffsetX = 12;
         const labelOffsetY = 12;
         centroidLabel.style.left      = `${finalLeft + labelOffsetX}px`;
