@@ -1,444 +1,796 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Interactive Curve & Centroid</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Baseline vs. Current Curves (Fixed Cumulative)</title>
+
   <!-- Chart.js core -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <!-- DragData plugin -->
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-dragdata@2.0.0"></script>
   <!-- Date adapter for time scale -->
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
-  <!-- CSV parser -->
+  <!-- CSV parser (for export) -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5"></script>
+
   <style>
     body { font-family: sans-serif; margin: 20px; }
-    #controls { margin-bottom: 15px; }
-    #controls label, #controls button { display: inline-block; margin-right: 20px; vertical-align: middle; }
-    #controls input, #controls select, #controls button { vertical-align: middle; }
-    #controls span.val { display: inline-block; width: 4ch; text-align: right; margin-left: 4px; }
-    #formulaBox { display: inline-block; margin-left: 16px; vertical-align: middle; font-size: 1.05em; background: #f5f5f5; border-radius: 6px; padding: 6px 16px; border: 1px solid #ddd;}
-    #main { display: flex; align-items: flex-start; }
-    #plot { flex: 1; width: 100%; max-width: 1200px; }
-    canvas { display: block; width: 100%; height: auto; }
-    #infoPanel { margin-left: 30px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; min-width: 180px; }
-    #infoPanel div { margin-bottom: 8px; }
+    #controls { margin-bottom: 20px; }
+    #controls fieldset { border: 1px solid #ccc; border-radius: 6px; padding: 12px; margin-bottom: 16px; }
+    #controls legend { font-weight: bold; }
+    #controls label { display: inline-block; margin-right: 20px; vertical-align: middle; }
+    #controls input, #controls select, #controls button, #controls a { vertical-align: middle; }
+    #controls span.val { display: inline-block; width: 3ch; text-align: right; margin-left: 4px; }
+    #formulaBoxBase, #formulaBoxCurr { display: inline-block; margin-left: 12px; vertical-align: middle; font-size: 1.05em; background: #f5f5f5; border-radius: 6px; padding: 6px 12px; border: 1px solid #ddd; }
+
+    #chartWrapper {
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      padding: 10px;
+      background: #fafafa;
+      height: 400px;
+      margin-bottom: 20px;
+    }
+    #chartWrapper canvas {
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    #infoPanel {
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      max-width: 400px;
+      background: #fdfdfd;
+    }
+    #infoPanel div { margin-bottom: 12px; }
     #infoPanel strong { display: block; margin-bottom: 4px; }
   </style>
 </head>
-<body>
 
+<body>
   <div id="controls">
-    <label>Upload CSV: <input type="file" id="csvFile" accept=".csv"></label>
-    <button id="exportCSV">Export CSV</button>
-    <br><br>
-    <label>Start Date: <input type="date" id="startDate"></label>
-    <label>End Date: <input type="date" id="endDate"></label>
-    <label>Y-Max: <input type="number" id="yMax" min="1" step="1"> <span class="val" id="yMaxVal"></span></label>
-    <br><br>
-    <label>Profile: 
-      <select id="distType">
-        <option value="flat">Flat Top</option>
-        <option value="gennorm">GenNorm</option>
-        <option value="leftskew">Left Skew</option>
-        <option value="bell">Bell</option>
-        <option value="rightskew">Right Skew</option>
-      </select>
-    </label>
-    <button id="resetCurve">Reset to Profile</button>
-    <!-- ADDED: Formula Display -->
-    <span id="formulaBox"></span>
-    <a href="https://ee-twister.github.io/Centroid_Shift/Centroid_Explain" target="_blank" style="margin-left:20px; font-weight:bold; color:#3366cc;">
-      View Centroid Shift Analysis Diagram
+    <!-- Baseline controls -->
+    <fieldset>
+      <legend>Baseline Curve Profile</legend>
+
+      <label>Start Date:
+        <input type="date" id="startDateBase">
+      </label>
+      <label>End Date:
+        <input type="date" id="endDateBase">
+      </label>
+      <br><br>
+
+      <label>Profile:
+        <select id="distTypeBase">
+          <option value="flat">Flat Top</option>
+          <option value="gennorm">GenNorm</option>
+          <option value="leftskew">Left Skew</option>
+          <option value="bell">Bell</option>
+          <option value="rightskew">Right Skew</option>
+        </select>
+      </label>
+      <span id="formulaBoxBase"></span>
+      <br><br>
+
+      <label id="alphaControlBase">α (skewness): <input type="range" id="alphaBase" min="0" max="20" step="0.1"><span class="val" id="alphaValBase"></span></label>
+      <label id="betaControlBase">β (shape):    <input type="range" id="betaBase"  min="0.1" max="10" step="0.1"><span class="val" id="betaValBase"></span></label>
+      <label id="muControlBase">μ (center):    <input type="range" id="muBase"    min="0"   max="1"  step="0.01"><span class="val" id="muValBase"></span></label>
+      <label id="sigmaControlBase">σ (spread):  <input type="range" id="sigmaBase" min="0.01" max="0.5" step="0.01"><span class="val" id="sigmaValBase"></span></label>
+      <label id="gammaControlBase">γ (width):   <input type="range" id="gammaBase" min="0"    max="1"   step="0.01"><span class="val" id="gammaValBase"></span></label>
+      <br><br>
+
+      <label>Target Cumulative:
+        <input type="number" id="targetCumulativeBase" step="any" style="width:8ch;">
+      </label>
+      <button id="setCumulativeBase">Set</button>
+      <br>
+      <small>(Baseline Actual Cumulative: <span id="actualCumulativeBase">–</span>)</small>
+      <br><br>
+
+      <button id="resetBase">Reset Baseline to Default</button>
+    </fieldset>
+
+    <!-- Current controls -->
+    <fieldset>
+      <legend>Current Curve Profile</legend>
+
+      <label>Start Date:
+        <input type="date" id="startDateCurr">
+      </label>
+      <label>End Date:
+        <input type="date" id="endDateCurr">
+      </label>
+      <br><br>
+
+      <label>Profile:
+        <select id="distTypeCurr">
+          <option value="flat">Flat Top</option>
+          <option value="gennorm">GenNorm</option>
+          <option value="leftskew">Left Skew</option>
+          <option value="bell">Bell</option>
+          <option value="rightskew">Right Skew</option>
+        </select>
+      </label>
+      <span id="formulaBoxCurr"></span>
+      <br><br>
+
+      <label id="alphaControlCurr">α (skewness): <input type="range" id="alphaCurr" min="0" max="20" step="0.1"><span class="val" id="alphaValCurr"></span></label>
+      <label id="betaControlCurr">β (shape):    <input type="range" id="betaCurr"  min="0.1" max="10" step="0.1"><span class="val" id="betaValCurr"></span></label>
+      <label id="muControlCurr">μ (center):    <input type="range" id="muCurr"    min="0"   max="1"  step="0.01"><span class="val" id="muValCurr"></span></label>
+      <label id="sigmaControlCurr">σ (spread):  <input type="range" id="sigmaCurr" min="0.01" max="0.5" step="0.01"><span class="val" id="sigmaValCurr"></span></label>
+      <label id="gammaControlCurr">γ (width):   <input type="range" id="gammaCurr" min="0"    max="1"   step="0.01"><span class="val" id="gammaValCurr"></span></label>
+      <br><br>
+
+      <label>Target Cumulative:
+        <input type="number" id="targetCumulativeCurr" step="any" style="width:8ch;">
+      </label>
+      <button id="setCumulativeCurr">Set</button>
+      <br>
+      <small>(Current Actual Cumulative: <span id="actualCumulativeCurr">–</span>)</small>
+      <br><br>
+
+      <button id="resetCurr">Reset Current to Default</button>
+    </fieldset>
+
+    <!-- Export & Bullseye Link -->
+    <button id="exportAllCSV">Export Both Curves as CSV</button>
+    <a id="bullseyeLink" href="#" target="_blank" style="margin-left:20px; font-weight:bold; color:#3366cc;">
+      View on Bullseye
     </a>
-    <a href="https://ee-twister.github.io/Centroid_Shift/Project_Bullseye.html" target="_blank" style="margin-left:20px; font-weight:bold; color:#3366cc;">
-      Bullseye
-    </a>
-    <br><br>
-    <div id="paramControls">
-      <label id="alphaControl">α (skewness factor): <input type="range" id="alpha" min="0" max="20" step="0.1"><span class="val" id="alphaVal"></span></label>
-      <label id="betaControl">β (shape exponent): <input type="range" id="beta" min="0.1" max="10" step="0.1"><span class="val" id="betaVal"></span></label>
-      <label id="muControl">μ (center): <input type="range" id="mu" min="0" max="1" step="0.01"><span class="val" id="muVal"></span></label>
-      <label id="sigmaControl">σ (spread): <input type="range" id="sigma" min="0.01" max="0.5" step="0.01"><span class="val" id="sigmaVal"></span></label>
-      <label id="gammaControl">γ (flat width): <input type="range" id="gamma" min="0" max="1" step="0.01"><span class="val" id="gammaVal"></span></label>
-    </div>
   </div>
 
-  <div id="main">
-    <canvas id="plot"></canvas>
-    <div id="infoPanel">
-      <div id="centroidDisplay">
-        <strong>Centroid</strong>
-        x: <span id="centroidX">–</span><br>
-        y: <span id="centroidY">–</span>
-      </div>
-      <div id="cumulativeDisplay">
-        <strong>Cumulative</strong>
-        <input type="number" id="cumulativeInput" step="any" style="width:8ch;">
-        <button id="setCumulativeBtn">Set</button>
-        <span id="cumulative">–</span>
-      </div>
-      <!-- ADDED: Max Slope Display -->
-      <div id="maxSlopeDisplay">
-        <strong>Max Slope</strong>
-        <span id="maxSlope">–</span>
-      </div>
+  <!-- Single chart containing both curves -->
+  <div id="chartWrapper">
+    <canvas id="combinedChart"></canvas>
+  </div>
+
+  <!-- Info panel for centroids & shift -->
+  <div id="infoPanel">
+    <div id="centroidBaselineDisplay">
+      <strong>Baseline Centroid</strong><br>
+      x: <span id="centroidBaseX">–</span><br>
+      y: <span id="centroidBaseY">–</span>
+    </div>
+    <div id="centroidCurrentDisplay">
+      <strong>Current Centroid</strong><br>
+      x: <span id="centroidCurrX">–</span><br>
+      y: <span id="centroidCurrY">–</span>
+    </div>
+    <div id="shiftDisplay">
+      <strong>Centroid Shift</strong><br>
+      Δx (days):  <span id="deltaX">–</span><br>
+      Δx (%):     <span id="deltaXPercent">–</span><br>
+      Δy (value): <span id="deltaY">–</span><br>
+      Δy (%):     <span id="deltaYPercent">–</span>
     </div>
   </div>
 
   <script>
     // --- Defaults & mappings ---
-    const defaults = { yMax: 1000, distType: 'bell', alpha: 5, beta: 2, mu: 0.5, sigma: 0.15, gamma: 0.2 };
-    const columnMap = { flat: 'Flat Top', gennorm: 'GenNorm', leftskew: 'Left Skew', bell: 'Bell', rightskew: 'Right Skew' };
+    const defaults = {
+      distType: 'bell',
+      alpha: 5,
+      beta: 2,
+      mu: 0.5,
+      sigma: 0.15,
+      gamma: 0.2
+    };
+    const columnMap = {
+      flat:     'Flat Top',
+      gennorm:  'GenNorm',
+      leftskew: 'Left Skew',
+      bell:     'Bell',
+      rightskew:'Right Skew'
+    };
 
-    // --- PDF & distributions ---
+    // --- PDF & distributions (200‐point resolution) ---
     const xs = Array.from({ length: 200 }, (_, i) => i / 199);
     function normalPDF(x, mu, sig) {
       const z = (x - mu) / sig;
       return Math.exp(-0.5 * z*z) / (sig * Math.sqrt(2 * Math.PI));
     }
-    function normalPDF_deriv(x, mu, sig) {
-      const z = (x - mu) / sig;
-      // d/dx of PDF: -z/sig * normalPDF
-      return -z / sig * normalPDF(x, mu, sig);
+    function skewPDF(x, alpha, mu, sig) {
+      const z = (x - mu)/sig;
+      const phi = Math.exp(-0.5 * z*z)/Math.sqrt(2*Math.PI);
+      const Phi = 0.5*(1 + erf(alpha*z/Math.SQRT2));
+      return (2 * phi * Phi) / sig;
+    }
+    function flatPDF(x, mu, g) {
+      const a = Math.max(0, mu - g/2), b = Math.min(1, mu + g/2);
+      if (x < a)   return (a > 0) ? x/a : 0;
+      if (x <= b)  return 1;
+      return (1 - x) / (1 - b);
+    }
+    function genPDF(x, beta, mu, sig) {
+      return Math.exp(-Math.pow(Math.abs((x - mu) / sig), beta));
     }
     function erf(x) {
       const sign = x < 0 ? -1 : 1;
       x = Math.abs(x);
       const [a1,a2,a3,a4,a5,p] = [0.254829592,-0.284496736,1.421413741,-1.453152027,1.061405429,0.3275911];
-      let t = 1 / (1 + p*x);
-      let y = 1 - (((((a5*t + a4)*t)+a3)*t+a2)*t+a1)*t*Math.exp(-x*x);
+      let t = 1/(1 + p * x);
+      let y = 1 - (((((a5*t + a4)*t) + a3)*t + a2)*t + a1)*t * Math.exp(-x*x);
       return sign * y;
-    }
-    function skewPDF(x, alpha, mu, sig) {
-      const z = (x - mu)/sig;
-      const phi = Math.exp(-0.5*z*z)/Math.sqrt(2*Math.PI);
-      const Phi = 0.5*(1 + erf(alpha*z/Math.SQRT2));
-      return (2*phi*Phi)/sig;
-    }
-    function flatPDF(x, mu, g) {
-      const a = Math.max(0,mu-g/2), b = Math.min(1,mu+g/2);
-      if(x<a) return a>0? x/a:0;
-      if(x<=b) return 1;
-      return (1-x)/(1-b);
-    }
-    function genPDF(x, beta, mu, sig) {
-      return Math.exp(-Math.pow(Math.abs((x-mu)/sig),beta));
     }
 
     // --- Formulae for display ---
     const formulaMap = {
-      flat: "f(x) = { 1 for |x-μ| ≤ γ/2; tapers linearly otherwise }",
-      gennorm: "f(x) = exp(-| (x-μ)/σ |^β )",
+      flat:     "f(x) = { 1 for |x-μ| ≤ γ/2; tapers linearly otherwise }",
+      gennorm:  "f(x) = exp(−| (x−μ)/σ |^β )",
       leftskew: "f(x) = 2·φ(z)·Φ(−α·z) / σ <br>z = (x−μ)/σ, φ = Normal PDF, Φ = Normal CDF",
-      bell: "f(x) = (1/(σ√(2π)))·exp(−½((x−μ)/σ)^2)",
-      rightskew: "f(x) = 2·φ(z)·Φ(α·z) / σ <br>z = (x−μ)/σ, φ = Normal PDF, Φ = Normal CDF"
+      bell:     "f(x) = (1/(σ√(2π)))·exp(−½((x−μ)/σ)^2)",
+      rightskew:"f(x) = 2·φ(z)·Φ(α·z) / σ <br>z = (x−μ)/σ, φ = Normal PDF, Φ = Normal CDF"
     };
 
-    // --- DOM refs ---
-    const startDateIn = document.getElementById('startDate'), endDateIn = document.getElementById('endDate');
-    const yMaxIn = document.getElementById('yMax'), yMaxVal = document.getElementById('yMaxVal');
-    const distType = document.getElementById('distType'), resetBtn = document.getElementById('resetCurve');
-    const csvFileIn = document.getElementById('csvFile'), exportBtn = document.getElementById('exportCSV');
-    const centroidX = document.getElementById('centroidX'), centroidY = document.getElementById('centroidY');
-    const cumulativeEl = document.getElementById('cumulative');
-    const alphaIn = document.getElementById('alpha'), betaIn = document.getElementById('beta');
-    const muIn = document.getElementById('mu'), sigmaIn = document.getElementById('sigma');
-    const gammaIn = document.getElementById('gamma');
-    const alphaValEl = document.getElementById('alphaVal'), betaValEl = document.getElementById('betaVal');
-    const muValEl = document.getElementById('muVal'), sigmaValEl = document.getElementById('sigmaVal');
-    const gammaValEl = document.getElementById('gammaVal');
-    const formulaBox = document.getElementById('formulaBox');
-    const cumulativeInput = document.getElementById('cumulativeInput');
-    const setCumulativeBtn = document.getElementById('setCumulativeBtn');
-    const maxSlopeEl = document.getElementById('maxSlope');
+    // --- DOM refs: Baseline ---
+    const startDateBaseIn    = document.getElementById('startDateBase'),
+          endDateBaseIn      = document.getElementById('endDateBase'),
+          distTypeBase       = document.getElementById('distTypeBase'),
+          formulaBoxBase     = document.getElementById('formulaBoxBase'),
+          alphaBase          = document.getElementById('alphaBase'),
+          alphaValBase       = document.getElementById('alphaValBase'),
+          betaBase           = document.getElementById('betaBase'),
+          betaValBase        = document.getElementById('betaValBase'),
+          muBase             = document.getElementById('muBase'),
+          muValBase          = document.getElementById('muValBase'),
+          sigmaBase          = document.getElementById('sigmaBase'),
+          sigmaValBase       = document.getElementById('sigmaValBase'),
+          gammaBase          = document.getElementById('gammaBase'),
+          gammaValBase       = document.getElementById('gammaValBase'),
+          targetCumBaseIn    = document.getElementById('targetCumulativeBase'),
+          setCumBaseBtn      = document.getElementById('setCumulativeBase'),
+          actualCumBaseSpan  = document.getElementById('actualCumulativeBase'),
+          resetBaseBtn       = document.getElementById('resetBase'),
+          centroidBaseX      = document.getElementById('centroidBaseX'),
+          centroidBaseY      = document.getElementById('centroidBaseY');
 
-    let csvData = [], csvColName = null, chart;
+    // --- DOM refs: Current ---
+    const startDateCurrIn    = document.getElementById('startDateCurr'),
+          endDateCurrIn      = document.getElementById('endDateCurr'),
+          distTypeCurr       = document.getElementById('distTypeCurr'),
+          formulaBoxCurr     = document.getElementById('formulaBoxCurr'),
+          alphaCurr          = document.getElementById('alphaCurr'),
+          alphaValCurr       = document.getElementById('alphaValCurr'),
+          betaCurr           = document.getElementById('betaCurr'),
+          betaValCurr        = document.getElementById('betaValCurr'),
+          muCurr             = document.getElementById('muCurr'),
+          muValCurr          = document.getElementById('muValCurr'),
+          sigmaCurr          = document.getElementById('sigmaCurr'),
+          sigmaValCurr       = document.getElementById('sigmaValCurr'),
+          gammaCurr          = document.getElementById('gammaCurr'),
+          gammaValCurr       = document.getElementById('gammaValCurr'),
+          targetCumCurrIn    = document.getElementById('targetCumulativeCurr'),
+          setCumCurrBtn      = document.getElementById('setCumulativeCurr'),
+          actualCumCurrSpan  = document.getElementById('actualCumulativeCurr'),
+          resetCurrBtn       = document.getElementById('resetCurr'),
+          centroidCurrX      = document.getElementById('centroidCurrX'),
+          centroidCurrY      = document.getElementById('centroidCurrY');
 
-    // --- Show/hide parameter controls ---
-    function updateParamVisibility() {
+    // --- DOM refs: Export & shift info ---
+    const exportAllBtn     = document.getElementById('exportAllCSV'),
+          bullseyeLink      = document.getElementById('bullseyeLink'),
+          deltaXEl         = document.getElementById('deltaX'),
+          deltaXPercentEl  = document.getElementById('deltaXPercent'),
+          deltaYEl         = document.getElementById('deltaY'),
+          deltaYPercentEl  = document.getElementById('deltaYPercent');
+
+    let combinedChart;     // Chart.js instance
+    let yMaxBase = 1, yMaxCurr = 1;  // will be determined by “Set Cumulative” logic
+
+    // --- Show/hide slider groups & update formula text (Baseline) ---
+    function updateParamVisibilityBase() {
       const map = {
-        flat: ['muControl','gammaControl'],
-        gennorm: ['betaControl','muControl','sigmaControl'],
-        leftskew: ['alphaControl','muControl','sigmaControl'],
-        bell: ['muControl','sigmaControl'],
-        rightskew: ['alphaControl','muControl','sigmaControl']
+        flat:     ['muControlBase','gammaControlBase'],
+        gennorm:  ['betaControlBase','muControlBase','sigmaControlBase'],
+        leftskew: ['alphaControlBase','muControlBase','sigmaControlBase'],
+        bell:     ['muControlBase','sigmaControlBase'],
+        rightskew:['alphaControlBase','muControlBase','sigmaControlBase']
       };
-      ['alphaControl','betaControl','muControl','sigmaControl','gammaControl'].forEach(id=>{
-        document.getElementById(id).style.display = 'none';
-      });
-      map[distType.value].forEach(id=>{
+      ['alphaControlBase','betaControlBase','muControlBase','sigmaControlBase','gammaControlBase']
+        .forEach(id => document.getElementById(id).style.display = 'none');
+      map[distTypeBase.value].forEach(id => {
         document.getElementById(id).style.display = 'inline-block';
       });
-      // ADDED: Update Formula
-      updateFormula();
+      formulaBoxBase.innerHTML = formulaMap[distTypeBase.value] || "";
     }
 
-    function updateFormula() {
-      const formula = formulaMap[distType.value];
-      formulaBox.innerHTML = formula || "";
+    // --- Show/hide slider groups & update formula text (Current) ---
+    function updateParamVisibilityCurr() {
+      const map = {
+        flat:     ['muControlCurr','gammaControlCurr'],
+        gennorm:  ['betaControlCurr','muControlCurr','sigmaControlCurr'],
+        leftskew: ['alphaControlCurr','muControlCurr','sigmaControlCurr'],
+        bell:     ['muControlCurr','sigmaControlCurr'],
+        rightskew:['alphaControlCurr','muControlCurr','sigmaControlCurr']
+      };
+      ['alphaControlCurr','betaControlCurr','muControlCurr','sigmaControlCurr','gammaControlCurr']
+        .forEach(id => document.getElementById(id).style.display = 'none');
+      map[distTypeCurr.value].forEach(id => {
+        document.getElementById(id).style.display = 'inline-block';
+      });
+      formulaBoxCurr.innerHTML = formulaMap[distTypeCurr.value] || "";
     }
 
-    // --- Restore defaults ---
-    function restoreDefaults() {
-      const today = new Date();
-      startDateIn.value = today.toISOString().slice(0,10);
-      const ny = new Date(); ny.setFullYear(today.getFullYear()+1);
-      endDateIn.value = ny.toISOString().slice(0,10);
-      yMaxIn.value = defaults.yMax; yMaxVal.textContent = defaults.yMax;
-      distType.value = defaults.distType;
-      alphaIn.value = defaults.alpha; alphaValEl.textContent = defaults.alpha;
-      betaIn.value = defaults.beta; betaValEl.textContent = defaults.beta;
-      muIn.value = defaults.mu; muValEl.textContent = defaults.mu.toFixed(2);
-      sigmaIn.value = defaults.sigma; sigmaValEl.textContent = defaults.sigma;
-      gammaIn.value = defaults.gamma; gammaValEl.textContent = defaults.gamma;
-      csvData = []; csvColName = null;
-      updateParamVisibility();
+    // --- Restore defaults for all controls ---
+    function restoreDefaultsAll() {
+      // Baseline defaults
+      const todayB = new Date();
+      const isoTodayB = todayB.toISOString().slice(0,10);
+      const nyB = new Date(); nyB.setFullYear(todayB.getFullYear() + 1);
+      startDateBaseIn.value = isoTodayB;
+      endDateBaseIn.value   = nyB.toISOString().slice(0,10);
+
+      distTypeBase.value = defaults.distType;
+      alphaBase.value    = defaults.alpha;    alphaValBase.textContent = defaults.alpha;
+      betaBase.value     = defaults.beta;     betaValBase.textContent  = defaults.beta;
+      muBase.value       = defaults.mu;       muValBase.textContent    = defaults.mu.toFixed(2);
+      sigmaBase.value    = defaults.sigma;    sigmaValBase.textContent = defaults.sigma;
+      gammaBase.value    = defaults.gamma;    gammaValBase.textContent = defaults.gamma;
+      updateParamVisibilityBase();
+
+      targetCumBaseIn.value = 1000;  // pick a default
+      yMaxBase = 1;                 // will be recomputed
+
+      // Current defaults
+      const todayC = new Date();
+      const isoTodayC = todayC.toISOString().slice(0,10);
+      const nyC = new Date(); nyC.setFullYear(todayC.getFullYear() + 1);
+      startDateCurrIn.value = isoTodayC;
+      endDateCurrIn.value   = nyC.toISOString().slice(0,10);
+
+      distTypeCurr.value = defaults.distType;
+      alphaCurr.value    = defaults.alpha;    alphaValCurr.textContent = defaults.alpha;
+      betaCurr.value     = defaults.beta;     betaValCurr.textContent  = defaults.beta;
+      muCurr.value       = defaults.mu;       muValCurr.textContent    = defaults.mu.toFixed(2);
+      sigmaCurr.value    = defaults.sigma;    sigmaValCurr.textContent = defaults.sigma;
+      gammaCurr.value    = defaults.gamma;    gammaValCurr.textContent = defaults.gamma;
+      updateParamVisibilityCurr();
+
+      targetCumCurrIn.value = 1000;  // default
+      yMaxCurr = 1;                  // will be recomputed
     }
 
-    // --- Initialize Chart.js ---
+    // --- Initialize Chart.js (single combined chart) ---
     function initChart() {
-      if(chart) return;
-      const ctx = document.getElementById('plot').getContext('2d');
-      chart = new Chart(ctx, {
-        type: 'scatter',
-        data: { datasets: [
-          { label: 'Profile', data: [], showLine: true, borderColor: 'blue', backgroundColor: 'blue', pointRadius: 2, dragData: true, dragX: false, dragY: true },
-          { label: 'Centroid', data: [], type: 'scatter', showLine: false, pointBackgroundColor: 'red', pointRadius: 6 }
-        ]},
+      if (combinedChart) return;
+      const ctx = document.getElementById('combinedChart').getContext('2d');
+      combinedChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          datasets: [
+            {
+              label: 'Baseline',
+              data: [],
+              borderColor: 'blue',
+              backgroundColor: 'rgba(0,0,255,0.1)',
+              fill: false,
+              pointRadius: 0,
+              tension: 0.2
+            },
+            {
+              label: 'Baseline Centroid',
+              data: [],
+              type: 'scatter',
+              showLine: false,
+              pointBackgroundColor: 'navy',
+              pointRadius: 6
+            },
+            {
+              label: 'Current',
+              data: [],
+              borderColor: 'red',
+              backgroundColor: 'rgba(255,0,0,0.1)',
+              fill: false,
+              pointRadius: 0,
+              tension: 0.2
+            },
+            {
+              label: 'Current Centroid',
+              data: [],
+              type: 'scatter',
+              showLine: false,
+              pointBackgroundColor: 'darkred',
+              pointRadius: 6
+            }
+          ]
+        },
         options: {
-          responsive: true, maintainAspectRatio: true, aspectRatio: 3,
+          responsive: true,
+          maintainAspectRatio: false,
           scales: {
-            x: { type: 'time', time: { unit: 'month' }, title: { display: true, text: 'Date' } },
-            y: { beginAtZero: true, title: { display: true, text: 'Value' }, max: defaults.yMax }
+            x: {
+              type: 'time',
+              time: { unit: 'month' },
+              title: { display: true, text: 'Date' }
+            },
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: 'Value' }
+            }
           },
-          plugins: { legend: { position: 'top' }, dragData: { onDragEnd: () => updateCentroidAndCumulative() } },
+          plugins: {
+            legend: {
+              display: true,
+              position: 'top'
+            }
+          },
           animation: false
         }
       });
     }
 
-    // --- CSV parse ---
-    function parseFile(file) {
-        Papa.parse(file, {
-            header: false,
-            skipEmptyLines: false,
-            complete(res) {
-            // Remove any leading blank lines
-            const rawRows = res.data.filter(row => Array.isArray(row));
-            // Gather first 12 non-blank, key-value parameter rows
-            const paramsList = [
-                "Profile", "StartDate", "EndDate", "YMax", "Alpha", "Beta", "Mu", "Sigma", "Gamma", "CentroidX", "CentroidY", "Cumulative"
-            ];
-            let paramsRows = [];
-            let i = 0;
-            // Collect only real param rows, skipping blanks at top or anywhere
-            while (paramsRows.length < 12 && i < rawRows.length) {
-                const row = rawRows[i];
-                if (Array.isArray(row) && row.length > 1 && row[0] && row[0].trim()) {
-                paramsRows.push(row);
-                }
-                i++;
-            }
-            // Now, check: exactly 12 params, in correct order
-            if (paramsRows.length !== 12) {
-                alert("Uploaded file does not contain the required 12 curve parameters. Upload cancelled.");
-                return;
-            }
-            const keys = paramsRows.map(r => (r[0]||"").trim());
-            const allKeysMatch = paramsList.every((p, idx) => keys[idx] === p);
-            if (!allKeysMatch) {
-                alert("Uploaded file does not contain valid curve parameters. Upload cancelled.");
-                return;
-            }
-            // All good, extract values and set controls
-            const values = paramsRows.map(r => r[1]);
-            const params = {};
-            paramsList.forEach((k, idx) => params[k] = values[idx]);
-            distType.value = Object.keys(columnMap).find(k => columnMap[k] === params.Profile) || "bell";
-            startDateIn.value = params.StartDate;
-            endDateIn.value = params.EndDate;
-            yMaxIn.value = params.YMax;
-            alphaIn.value = params.Alpha;
-            betaIn.value = params.Beta;
-            muIn.value = params.Mu;
-            sigmaIn.value = params.Sigma;
-            gammaIn.value = params.Gamma;
-            updateParamVisibility();
-            csvData = [];
-            csvColName = null;
-            alphaValEl.textContent = alphaIn.value;
-            betaValEl.textContent = betaIn.value;
-            muValEl.textContent = muIn.value;
-            sigmaValEl.textContent = sigmaIn.value;
-            gammaValEl.textContent = gammaIn.value;
-            yMaxVal.textContent = yMaxIn.value;
-            // ADDED: Set cumulativeInput to imported value
-            cumulativeInput.value = params.Cumulative;
-            initPlot();
-            }
-        });
+    // --- Generate 200 points for a curve given dist parameters, date range, and yMax ---
+    function generateDistributionPoints(distType, alpha, beta, mu, sigma, gamma, startDate, endDate, yMax) {
+      const fnMap = {
+        flat:     x => flatPDF(x, mu, gamma),
+        gennorm:  x => genPDF(x, beta, mu, sigma),
+        leftskew: x => skewPDF(x, -alpha, mu, sigma),
+        bell:     x => normalPDF(x, mu, sigma),
+        rightskew:x => skewPDF(x, alpha, mu, sigma)
+      };
+      const fn = fnMap[distType];
+      const raw = xs.map(fn);
+      const R = Math.max(...raw);
+
+      const startMs = new Date(startDate).getTime();
+      const endMs   = new Date(endDate).getTime();
+      return xs.map((x, i) => ({
+        x: new Date(startMs + x * (endMs - startMs)),
+        y: (raw[i] / R) * yMax
+      }));
     }
 
-    // --- Plot logic ---
-    function initPlot() {
-      initChart();
-      const start = new Date(startDateIn.value), end = new Date(endDateIn.value), yMax = +yMaxIn.value;
-      let pts = [];
-      if(csvData.length) {
-        const filtered = csvData.filter(r => r.date >= start && r.date <= end);
-        pts = filtered.map(r => ({ x: r.date, y: +r.val }));
-        chart.options.scales.y.max = yMax;
-      } else {
-        const [a,b,m,s,g] = [+alphaIn.value, +betaIn.value, +muIn.value, +sigmaIn.value, +gammaIn.value];
-        const fnMap = {
-          flat:    x => flatPDF(x,m,g),
-          gennorm: x => genPDF(x,b,m,s),
-          leftskew:x => skewPDF(x,-a,m,s),
-          bell:    x => normalPDF(x,m,s),
-          rightskew:x => skewPDF(x,a,m,s)
-        };
-        const fn = fnMap[distType.value];
-        const raw = xs.map(fn), R = Math.max(...raw);
-        pts = xs.map((x,i) => ({ x: new Date(start.getTime() + x*(end-start)), y: (raw[i]/R)*yMax }));
-        chart.options.scales.y.max = yMax;
+    // --- Compute cumulative area + centroid + max slope for given points & date range ---
+    function computeInfo(points, startTime, endTime) {
+      if (points.length === 0) {
+        return { cDate: null, yC: 0, cumulative: 0, maxSlope: 0 };
       }
-      chart.data.datasets[0].data = pts;
-      chart.options.scales.x.min = start;
-      chart.options.scales.x.max = end;
-      chart.update();
-      updateCentroidAndCumulative();
-    }
 
-    // --- Centroid & cumulative & max slope ---
-    function updateCentroidAndCumulative() {
-      const pts = chart.data.datasets[0].data;
-      if(!pts.length) return;
-      const minT = chart.options.scales.x.min.getTime(), maxT = chart.options.scales.x.max.getTime();
-      let sumY=0, sumXY=0;
-      pts.forEach(p => {
-        const f = (p.x.getTime()-minT)/(maxT-minT);
-        sumY += p.y; sumXY += f*p.y;
-      });
-      const xf = sumXY/sumY, cDate = new Date(minT + xf*(maxT-minT));
-      const yC = sumY ? pts.reduce((a,p)=>a+p.y*p.y,0)/(2*sumY) : 0;
-      chart.data.datasets[1].data = [{ x: cDate, y: yC }];
-      centroidX.textContent = cDate.toISOString().slice(0,10);
-      centroidY.textContent = yC.toFixed(2);
+      // Centroid computations
+      let sumY = 0, sumXY = 0;
+      for (let p of points) {
+        const t = p.x.getTime();
+        const f = (t - startTime) / (endTime - startTime);
+        sumY += p.y;
+        sumXY += f * p.y;
+      }
+      const xf = sumY ? (sumXY / sumY) : 0;
+      const cDate = new Date(startTime + xf * (endTime - startTime));
+      const yC    = sumY ? points.reduce((a,p) => a + p.y*p.y, 0) / (2 * sumY) : 0;
+
+      // Cumulative area (trapezoidal)
       let cum = 0;
-      if(csvData.length) {
-        cum = pts.reduce((a,p)=>a+p.y,0);
-      } else {
-        const msDay = 1000*60*60*24;
-        for(let i=0; i<pts.length-1; i++) {
-          const yAvg = (pts[i].y + pts[i+1].y)/2;
-          const days = (pts[i+1].x - pts[i].x)/msDay;
-          cum += yAvg*days;
-        }
+      const msDay = 1000 * 60 * 60 * 24;
+      for (let i = 0; i < points.length - 1; i++) {
+        const yAvg = (points[i].y + points[i+1].y) / 2;
+        const days = (points[i+1].x - points[i].x) / msDay;
+        cum += yAvg * days;
       }
-      cumulativeEl.textContent = cum.toFixed(2);
-      cumulativeInput.value = cumulativeEl.textContent;
 
-      // ADDED: Max Slope Calculation
+      // Max slope (not displayed here)
       let maxSlope = 0;
-      for (let i = 1; i < pts.length; i++) {
-        const dx = (pts[i].x - pts[i-1].x) / (1000*60*60*24); // in days
-        const dy = pts[i].y - pts[i-1].y;
+      for (let i = 1; i < points.length; i++) {
+        const dx = (points[i].x - points[i-1].x) / (1000 * 60 * 60 * 24);
+        const dy = points[i].y - points[i-1].y;
         if (dx !== 0) {
           const slope = dy / dx;
-          if (Math.abs(slope) > Math.abs(maxSlope)) maxSlope = slope;
+          if (Math.abs(slope) > Math.abs(maxSlope)) {
+            maxSlope = slope;
+          }
         }
       }
-      maxSlopeEl.textContent = maxSlope.toFixed(2);
-      chart.update('none');
+
+      return { cDate, yC, cumulative: cum, maxSlope };
     }
 
-    // --- CSV Export (unchanged) ---
-    function exportCSV() {
+    // --- Recompute both curves (automatic Y‐scale to match target cumulative), then redraw everything ---
+    function redrawAll() {
+      initChart();
+
+      // Baseline: gather parameters
+      const sBase = new Date(startDateBaseIn.value).getTime();
+      const eBase = new Date(endDateBaseIn.value).getTime();
+      const dTypeB = distTypeBase.value;
+      const aB = +alphaBase.value, bB = +betaBase.value, mB = +muBase.value, sB = +sigmaBase.value, gB = +gammaBase.value;
+      const tCumB = parseFloat(targetCumBaseIn.value);
+
+      // Current: gather parameters
+      const sCurr = new Date(startDateCurrIn.value).getTime();
+      const eCurr = new Date(endDateCurrIn.value).getTime();
+      const dTypeC = distTypeCurr.value;
+      const aC = +alphaCurr.value, bC = +betaCurr.value, mC = +muCurr.value, sC = +sigmaCurr.value, gC = +gammaCurr.value;
+      const tCumC = parseFloat(targetCumCurrIn.value);
+
+      // 1) Binary search yMaxBase so that cumulative ≈ tCumB
+      if (!isNaN(tCumB) && tCumB > 0) {
+        let low = 1, high = 1e7, best = 1, lastDiff = Infinity;
+        const maxIter = 30, tol = 1e-2;
+        let iter = 0;
+        while (iter < maxIter) {
+          const mid = (low + high) / 2;
+          const pts = generateDistributionPoints(dTypeB, aB, bB, mB, sB, gB,
+                                                 startDateBaseIn.value, endDateBaseIn.value, mid);
+          const info = computeInfo(pts, sBase, eBase);
+          const diff = info.cumulative - tCumB;
+          if (Math.abs(diff) < tol) {
+            best = mid;
+            break;
+          }
+          if (diff < 0) low = mid;
+          else high = mid;
+          if (Math.abs(diff) < Math.abs(lastDiff)) best = mid;
+          lastDiff = diff;
+          iter++;
+        }
+        yMaxBase = best;
+      } else {
+        yMaxBase = 1;
+      }
+
+      // 2) Binary search yMaxCurr so that cumulative ≈ tCumC
+      if (!isNaN(tCumC) && tCumC > 0) {
+        let low = 1, high = 1e7, best = 1, lastDiff = Infinity;
+        const maxIter = 30, tol = 1e-2;
+        let iter = 0;
+        while (iter < maxIter) {
+          const mid = (low + high) / 2;
+          const pts = generateDistributionPoints(dTypeC, aC, bC, mC, sC, gC,
+                                                 startDateCurrIn.value, endDateCurrIn.value, mid);
+          const info = computeInfo(pts, sCurr, eCurr);
+          const diff = info.cumulative - tCumC;
+          if (Math.abs(diff) < tol) {
+            best = mid;
+            break;
+          }
+          if (diff < 0) low = mid;
+          else high = mid;
+          if (Math.abs(diff) < Math.abs(lastDiff)) best = mid;
+          lastDiff = diff;
+          iter++;
+        }
+        yMaxCurr = best;
+      } else {
+        yMaxCurr = 1;
+      }
+
+      // 3) Generate final points for both curves with their respective yMax
+      const ptsB = generateDistributionPoints(dTypeB, aB, bB, mB, sB, gB,
+                                               startDateBaseIn.value, endDateBaseIn.value, yMaxBase);
+      const ptsC = generateDistributionPoints(dTypeC, aC, bC, mC, sC, gC,
+                                               startDateCurrIn.value, endDateCurrIn.value, yMaxCurr);
+
+      // 4) Update chart’s x‐axis range to cover both date windows
+      const globalMin = new Date(Math.min(sBase, sCurr));
+      const globalMax = new Date(Math.max(eBase, eCurr));
+      combinedChart.options.scales.x.min = globalMin;
+      combinedChart.options.scales.x.max = globalMax;
+
+      // 5) Assign data to datasets
+      combinedChart.data.datasets[0].data = ptsB; // Baseline
+      combinedChart.data.datasets[2].data = ptsC; // Current
+
+      // 6) Compute centroids & cumulative, then plot single centroid points
+      const infoB = computeInfo(ptsB, sBase, eBase);
+      if (infoB.cDate) {
+        combinedChart.data.datasets[1].data = [{ x: infoB.cDate, y: infoB.yC }];
+        centroidBaseX.textContent = infoB.cDate.toISOString().slice(0,10);
+        centroidBaseY.textContent = infoB.yC.toFixed(2);
+      } else {
+        combinedChart.data.datasets[1].data = [];
+        centroidBaseX.textContent = '–';
+        centroidBaseY.textContent = '–';
+      }
+      actualCumBaseSpan.textContent = infoB.cumulative.toFixed(2);
+
+      const infoC = computeInfo(ptsC, sCurr, eCurr);
+      if (infoC.cDate) {
+        combinedChart.data.datasets[3].data = [{ x: infoC.cDate, y: infoC.yC }];
+        centroidCurrX.textContent = infoC.cDate.toISOString().slice(0,10);
+        centroidCurrY.textContent = infoC.yC.toFixed(2);
+      } else {
+        combinedChart.data.datasets[3].data = [];
+        centroidCurrX.textContent = '–';
+        centroidCurrY.textContent = '–';
+      }
+      actualCumCurrSpan.textContent = infoC.cumulative.toFixed(2);
+
+      // 7) Compute shift Δx, Δy, Δx%, Δy%
+      if (infoB.cDate && infoC.cDate) {
+        const dxDays = (infoC.cDate - infoB.cDate) / (1000 * 60 * 60 * 24);
+        const dyVal  = infoC.yC - infoB.yC;
+        deltaXEl.textContent = dxDays.toFixed(2);
+        deltaYEl.textContent = dyVal.toFixed(2);
+
+        // Δx% relative to how far Baseline’s centroid is from Baseline’s start
+        const baselineDaysFromStart = (infoB.cDate.getTime() - sBase) / (1000 * 60 * 60 * 24);
+        let dxPercent = null;
+        if (baselineDaysFromStart !== 0) {
+          const pctX = (dxDays / baselineDaysFromStart) * 100;
+          dxPercent = pctX.toFixed(2);
+          deltaXPercentEl.textContent = dxPercent + "%";
+        } else {
+          deltaXPercentEl.textContent = "–";
+        }
+
+        // Δy% relative to Baseline’s centroid y
+        let dyPercent = null;
+        if (infoB.yC !== 0) {
+          const pctY = (dyVal / infoB.yC) * 100;
+          dyPercent = pctY.toFixed(2);
+          deltaYPercentEl.textContent = dyPercent + "%";
+        } else {
+          deltaYPercentEl.textContent = "–";
+        }
+
+        // Update Bullseye link with these percentage values (strip "%" if present)
+        if (dxPercent !== null && dyPercent !== null) {
+          const url = new URL("https://ee-twister.github.io/Centroid_Shift/Project_Bullseye");
+          url.searchParams.set("xPercent", dxPercent);
+          url.searchParams.set("yPercent", dyPercent);
+          bullseyeLink.href = url.toString();
+        } else {
+          bullseyeLink.href = "https://ee-twister.github.io/Centroid_Shift/Project_Bullseye";
+        }
+      } else {
+        deltaXEl.textContent = '–';
+        deltaXPercentEl.textContent = '–';
+        deltaYEl.textContent = '–';
+        deltaYPercentEl.textContent = '–';
+        bullseyeLink.href = "https://ee-twister.github.io/Centroid_Shift/Project_Bullseye";
+      }
+
+      combinedChart.update();
+    }
+
+    // --- Export both curves as one CSV ---
+    function exportAllCSV() {
+      // Metadata
       const params = {
-        Profile: columnMap[distType.value],
-        StartDate: startDateIn.value,
-        EndDate: endDateIn.value,
-        YMax: yMaxIn.value,
-        Alpha: alphaIn.value,
-        Beta: betaIn.value,
-        Mu: muIn.value,
-        Sigma: sigmaIn.value,
-        Gamma: gammaIn.value,
-        CentroidX: centroidX.textContent,
-        CentroidY: centroidY.textContent,
-        Cumulative: cumulativeEl.textContent
+        Profile_Baseline:     columnMap[distTypeBase.value],
+        StartDate_Baseline:   startDateBaseIn.value,
+        EndDate_Baseline:     endDateBaseIn.value,
+        Alpha_Baseline:       alphaBase.value,
+        Beta_Baseline:        betaBase.value,
+        Mu_Baseline:          muBase.value,
+        Sigma_Baseline:       sigmaBase.value,
+        Gamma_Baseline:       gammaBase.value,
+        TargetCumulative_Baseline: targetCumBaseIn.value,
+        YMax_Baseline:        yMaxBase.toFixed(2),
+        CentroidX_Baseline:   centroidBaseX.textContent,
+        CentroidY_Baseline:   centroidBaseY.textContent,
+        Cumulative_Baseline:  actualCumBaseSpan.textContent,
+
+        Profile_Current:      columnMap[distTypeCurr.value],
+        StartDate_Current:    startDateCurrIn.value,
+        EndDate_Current:      endDateCurrIn.value,
+        Alpha_Current:        alphaCurr.value,
+        Beta_Current:         betaCurr.value,
+        Mu_Current:           muCurr.value,
+        Sigma_Current:        sigmaCurr.value,
+        Gamma_Current:        gammaCurr.value,
+        TargetCumulative_Current: targetCumCurrIn.value,
+        YMax_Current:         yMaxCurr.toFixed(2),
+        CentroidX_Current:    centroidCurrX.textContent,
+        CentroidY_Current:    centroidCurrY.textContent,
+        Cumulative_Current:   actualCumCurrSpan.textContent
       };
-      const metaRows = Object.entries(params).map(([k,v]) => [k,v]);
-      metaRows.push([]);
-      const rows = chart.data.datasets[0].data.map(p => ({
+
+      // Build metadata rows
+      const metaRows = [];
+      for (let [k, v] of Object.entries(params)) {
+        metaRows.push([k, v]);
+      }
+      metaRows.push([]); // blank line
+
+      // Baseline data
+      const baseRows = combinedChart.data.datasets[0].data.map(p => ({
         date: p.x.toISOString().slice(0,10),
         value: p.y.toFixed(2)
       }));
-      let csvMeta = Papa.unparse(metaRows, {header: false, skipEmptyLines: false});
-      let csvData = Papa.unparse(rows, {header: true});
-      let csvStr = csvMeta + "\n" + csvData;
-      const blob = new Blob([csvStr], { type:'text/csv;charset=utf-8;' });
+      const baseCSV = Papa.unparse(baseRows, { header: true });
+
+      // Separator
+      const sepLine = "\n";
+
+      // Current data
+      const currRows = combinedChart.data.datasets[2].data.map(p => ({
+        date: p.x.toISOString().slice(0,10),
+        value: p.y.toFixed(2)
+      }));
+      const currCSV = Papa.unparse(currRows, { header: true });
+
+      let csvMeta = Papa.unparse(metaRows, { header: false, skipEmptyLines: false });
+      let fullCSV = csvMeta + "\n" + baseCSV + sepLine + currCSV;
+
+      const blob = new Blob([fullCSV], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'exported_curve.csv';
+      link.download = 'baseline_current_curves.csv';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
     }
 
     // --- Event bindings ---
-    csvFileIn.addEventListener('change', e => parseFile(e.target.files[0]));
-    exportBtn.addEventListener('click', exportCSV);
-    startDateIn.addEventListener('input', initPlot);
-    endDateIn.addEventListener('input', initPlot);
-    yMaxIn.addEventListener('input', () => { yMaxVal.textContent = yMaxIn.value; initPlot(); });
-    distType.addEventListener('input', () => { csvData = []; csvColName = null; updateParamVisibility(); initPlot(); });
-    resetBtn.addEventListener('click', () => { restoreDefaults(); initPlot(); });
-    [alphaIn, betaIn, muIn, sigmaIn, gammaIn].forEach(el => el.addEventListener('input', () => {
-      csvData = []; csvColName = null;
-      document.getElementById(el.id+'Val').textContent = el.value;
-      initPlot();
-    }));
 
-    // ADDED: Set Cumulative Button Logic
-    setCumulativeBtn.addEventListener('click', function() {
-      const targetCumulative = parseFloat(cumulativeInput.value);
-      if (isNaN(targetCumulative) || targetCumulative <= 0) {
-        alert('Enter a valid cumulative value.');
-        return;
-      }
-      let minY = 1, maxY = 1e7, iter = 0, bestYMax = yMaxIn.value, lastDiff = Infinity;
-      const maxIter = 30, tol = 1e-2;
-      while (iter < maxIter) {
-        let midY = (minY + maxY) / 2;
-        yMaxIn.value = midY;
-        yMaxVal.textContent = midY;
-        initPlot();
-        let actualCumulative = parseFloat(cumulativeEl.textContent);
-        let diff = actualCumulative - targetCumulative;
-        if (Math.abs(diff) < tol) {
-          bestYMax = midY;
-          break;
-        }
-        if (diff < 0) minY = midY;
-        else maxY = midY;
-        if (Math.abs(diff) < Math.abs(lastDiff)) bestYMax = midY;
-        lastDiff = diff;
-        iter++;
-      }
-      yMaxIn.value = bestYMax;
-      yMaxVal.textContent = bestYMax;
-      initPlot();
+    // Baseline date
+    startDateBaseIn.addEventListener('input', redrawAll);
+    endDateBaseIn.addEventListener('input', redrawAll);
+
+    // Baseline distribution
+    distTypeBase.addEventListener('input', () => { updateParamVisibilityBase(); redrawAll(); });
+    alphaBase.addEventListener('input', () => { alphaValBase.textContent = alphaBase.value; redrawAll(); });
+    betaBase.addEventListener('input', () => { betaValBase.textContent = betaBase.value; redrawAll(); });
+    muBase.addEventListener('input', () => { muValBase.textContent = parseFloat(muBase.value).toFixed(2); redrawAll(); });
+    sigmaBase.addEventListener('input', () => { sigmaValBase.textContent = sigmaBase.value; redrawAll(); });
+    gammaBase.addEventListener('input', () => { gammaValBase.textContent = gammaBase.value; redrawAll(); });
+
+    // Baseline Set Cumulative
+    setCumBaseBtn.addEventListener('click', () => { redrawAll(); });
+
+    // Baseline Reset
+    resetBaseBtn.addEventListener('click', () => {
+      const todayB = new Date();
+      const isoTodayB = todayB.toISOString().slice(0,10);
+      const nyB = new Date(); nyB.setFullYear(todayB.getFullYear() + 1);
+      startDateBaseIn.value = isoTodayB;
+      endDateBaseIn.value   = nyB.toISOString().slice(0,10);
+
+      distTypeBase.value = defaults.distType;
+      alphaBase.value    = defaults.alpha;    alphaValBase.textContent = defaults.alpha;
+      betaBase.value     = defaults.beta;     betaValBase.textContent  = defaults.beta;
+      muBase.value       = defaults.mu;       muValBase.textContent    = defaults.mu.toFixed(2);
+      sigmaBase.value    = defaults.sigma;    sigmaValBase.textContent = defaults.sigma;
+      gammaBase.value    = defaults.gamma;    gammaValBase.textContent = defaults.gamma;
+      targetCumBaseIn.value = "";
+      yMaxBase = 1;
+      updateParamVisibilityBase();
+      redrawAll();
     });
 
-    // --- Initialize ---
+    // Current date
+    startDateCurrIn.addEventListener('input', redrawAll);
+    endDateCurrIn.addEventListener('input', redrawAll);
+
+    // Current distribution
+    distTypeCurr.addEventListener('input', () => { updateParamVisibilityCurr(); redrawAll(); });
+    alphaCurr.addEventListener('input', () => { alphaValCurr.textContent = alphaCurr.value; redrawAll(); });
+    betaCurr.addEventListener('input', () => { betaValCurr.textContent = betaCurr.value; redrawAll(); });
+    muCurr.addEventListener('input', () => { muValCurr.textContent = parseFloat(muCurr.value).toFixed(2); redrawAll(); });
+    sigmaCurr.addEventListener('input', () => { sigmaValCurr.textContent = sigmaCurr.value; redrawAll(); });
+    gammaCurr.addEventListener('input', () => { gammaValCurr.textContent = gammaCurr.value; redrawAll(); });
+
+    // Current Set Cumulative
+    setCumCurrBtn.addEventListener('click', () => { redrawAll(); });
+
+    // Current Reset
+    resetCurrBtn.addEventListener('click', () => {
+      const todayC = new Date();
+      const isoTodayC = todayC.toISOString().slice(0,10);
+      const nyC = new Date(); nyC.setFullYear(todayC.getFullYear() + 1);
+      startDateCurrIn.value = isoTodayC;
+      endDateCurrIn.value   = nyC.toISOString().slice(0,10);
+
+      distTypeCurr.value = defaults.distType;
+      alphaCurr.value    = defaults.alpha;    alphaValCurr.textContent = defaults.alpha;
+      betaCurr.value     = defaults.beta;     betaValCurr.textContent  = defaults.beta;
+      muCurr.value       = defaults.mu;       muValCurr.textContent    = defaults.mu.toFixed(2);
+      sigmaCurr.value    = defaults.sigma;    sigmaValCurr.textContent = defaults.sigma;
+      gammaCurr.value    = defaults.gamma;    gammaValCurr.textContent = defaults.gamma;
+      targetCumCurrIn.value = "";
+      yMaxCurr = 1;
+      updateParamVisibilityCurr();
+      redrawAll();
+    });
+
+    // Export
+    exportAllBtn.addEventListener('click', exportAllCSV);
+
+    // Initialize on load
     document.addEventListener('DOMContentLoaded', () => {
-      restoreDefaults();
-      yMaxVal.textContent = yMaxIn.value;
-      updateFormula();
-      initPlot();
+      restoreDefaultsAll();
+      redrawAll();
     });
   </script>
 </body>
